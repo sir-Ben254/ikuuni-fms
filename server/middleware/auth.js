@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const { pool } = require('../config/database');
+const { supabase } = require('../config/database');
 
 // JWT Authentication Middleware
 const authenticateToken = (req, res, next) => {
@@ -66,18 +66,16 @@ const generateToken = (user) => {
 // Log Activity
 const logActivity = async (userId, action, module, description, req) => {
   try {
-    await pool.query(
-      `INSERT INTO activity_logs (user_id, action, module, description, ip_address, user_agent)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [
-        userId,
+    await supabase
+      .from('activity_logs')
+      .insert({
+        user_id: userId,
         action,
         module,
         description,
-        req?.ip || req?.connection?.remoteAddress,
-        req?.get('User-Agent')
-      ]
-    );
+        ip_address: req?.ip || req?.connection?.remoteAddress || 'unknown',
+        user_agent: req?.get('User-Agent') || 'unknown'
+      });
   } catch (error) {
     console.error('Error logging activity:', error);
   }

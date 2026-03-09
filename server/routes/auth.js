@@ -18,12 +18,24 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Username and password required' });
     }
 
-    const { data: users, error } = await supabase
+    // Try to find user by username
+    let { data: users, error } = await supabase
       .from('users')
       .select('id, username, email, password_hash, full_name, role, is_active')
-      .or(`username.eq.${username},email.eq.${username}`);
+      .eq('username', username);
 
-    if (error) throw error;
+    // If not found by username, try email
+    if (!users || users.length === 0) {
+      ({ data: users, error } = await supabase
+        .from('users')
+        .select('id, username, email, password_hash, full_name, role, is_active')
+        .eq('email', username));
+    }
+
+    if (error) {
+      console.error('Supabase error:', error);
+      throw error;
+    }
 
     if (!users || users.length === 0) {
       return res.status(401).json({ error: 'Invalid credentials' });

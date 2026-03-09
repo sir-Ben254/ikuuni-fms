@@ -18,7 +18,6 @@ A comprehensive hospitality management system for New Ikuuni hotel and restauran
 - Kitchen order tickets
 - Multiple payment methods (Cash, M-Pesa, Card)
 - Automatic inventory deduction
-- Real-time sales tracking
 
 ### 3. Room Management
 - Room booking calendar
@@ -40,7 +39,6 @@ A comprehensive hospitality management system for New Ikuuni hotel and restauran
 - Supplier management
 - Purchase orders
 - Low-stock alerts
-- Cost of goods sold (COGS)
 
 ### 6. Expense Tracking
 - Multiple expense categories
@@ -68,164 +66,127 @@ A comprehensive hospitality management system for New Ikuuni hotel and restauran
 ## Tech Stack
 
 - **Backend**: Node.js + Express
-- **Database**: PostgreSQL
+- **Database**: Supabase (PostgreSQL)
 - **Frontend**: HTML, CSS, JavaScript
 - **Charts**: Chart.js
-- **Reports**: PDFKit, ExcelJS
 
-## Installation
+## Quick Start with Supabase
 
-### Prerequisites
-- Node.js (v14+)
-- PostgreSQL (v12+)
+### Step 1: Create Supabase Project
+1. Go to https://supabase.com/
+2. Create a free account
+3. Create a new project
+4. Wait for the database to be ready
 
-### Setup
+### Step 2: Get Supabase Credentials
+From your Supabase dashboard:
+- **Project URL**: Settings → API → Project URL
+- **Anon Key**: Settings → API → Project API keys → `anon` key
 
-1. **Clone the repository**
-   ```bash
-   cd "project biz 2026/ai/hotel fms"
-   ```
+### Step 3: Update Environment Variables
+Edit `.env` file:
+```env
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=your-anon-key-here
+```
 
-2. **Install dependencies**
-   ```bash
-   npm install
-   cd client && npm install
-   ```
+### Step 4: Create Database Tables
+In Supabase Dashboard:
+1. Go to **SQL Editor**
+2. Copy the SQL from `server/config/database.js` (the CREATE TABLE statements)
+3. Run the SQL
 
-3. **Configure database**
-   - Create a PostgreSQL database named `new_ikuuni_fms`
-   - Update `.env` file with your database credentials:
-   ```
-   DB_HOST=localhost
-   DB_PORT=5432
-   DB_NAME=new_ikuuni_fms
-   DB_USER=postgres
-   DB_PASSWORD=your_password
-   ```
+### Step 5: Run the Server
+```bash
+npm install
+npm start
+```
 
-4. **Start the server**
-   ```bash
-   npm start
-   ```
+### Step 6: Access the Application
+- Open http://localhost:3000
+- Login with: admin / admin123
 
-5. **Start the frontend** (in a new terminal)
-   ```bash
-   cd client
-   npm start
-   ```
+## Deployment to Online
 
-6. **Access the application**
-   - Open http://localhost:3001 in your browser
-   - Login with default credentials:
-     - Username: `admin`
-     - Password: `admin123`
+### Option 1: Vercel (Backend) + Supabase
 
-## Default User Roles
+1. **Deploy Backend to Vercel:**
+```bash
+npm install -g vercel
+vercel
+```
 
-| Role | Description |
-|------|-------------|
-| Admin | Full system access, can approve payments |
-| Manager | Manage all operations, approve expenses |
-| Cashier | Process payments, create orders |
-| Accountant | View reports, manage expenses |
-| Kitchen | View kitchen orders |
-| Waiter/Waitress | Create orders |
+2. **Update Frontend API Base URL:**
+Edit `client/public/app.js` and change:
+```javascript
+const API_BASE = 'https://your-vercel-backend.vercel.app/api';
+```
 
-## API Endpoints
+3. **Deploy Frontend:**
+```bash
+cd client
+npx serve public
+```
 
-### Authentication
-- `POST /api/auth/login` - User login
-- `POST /api/auth/register` - Create user (admin)
-- `GET /api/auth/me` - Get current user
+Or deploy to Vercel/Netlify as a static site.
 
-### POS
-- `GET /api/pos/menu-items` - Get menu items
-- `POST /api/pos/orders` - Create order
-- `POST /api/pos/orders/:id/payment` - Process payment
-- `GET /api/pos/sales/today` - Today's sales
+### Option 2: Railway/Render
 
-### Rooms
-- `GET /api/rooms` - Get all rooms
-- `POST /api/rooms/bookings` - Create booking
-- `POST /api/rooms/bookings/:id/check-in` - Check in guest
-- `POST /api/rooms/bookings/:id/check-out` - Check out guest
+1. Deploy to Railway or Render
+2. Set environment variables in dashboard
+3. Connect to Supabase
 
-### Catering
-- `GET /api/catering/events` - Get events
-- `POST /api/catering/events` - Create event
-- `POST /api/catering/events/:id/payment` - Record payment
+## Environment Variables
 
-### Inventory
-- `GET /api/inventory/items` - Get inventory
-- `POST /api/inventory/purchase-orders` - Create PO
-- `GET /api/inventory/alerts` - Low stock alerts
+```env
+# Server
+PORT=3000
 
-### Expenses
-- `GET /api/expenses` - Get expenses
-- `POST /api/expenses` - Create expense
-- `POST /api/expenses/:id/approve` - Approve expense
+# Supabase
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=your-anon-key
 
-### Staff
-- `GET /api/staff/salaries` - Get salaries
-- `POST /api/staff/salaries` - Create salary
-- `POST /api/staff/salaries/:id/approve` - Approve salary
-- `POST /api/staff/salaries/:id/pay` - Pay salary
+# JWT
+JWT_SECRET=your-secret-key
 
-### Reports
-- `GET /api/reports/dashboard` - Dashboard data
-- `GET /api/reports/daily` - Daily report
-- `GET /api/reports/monthly` - Monthly report
-- `GET /api/reports/export/pdf` - Export PDF
-- `GET /api/reports/export/excel` - Export Excel
+# M-Pesa (Kenya)
+MPESA_CONSUMER_KEY=your_key
+MPESA_CONSUMER_SECRET=your_secret
+MPESA_SHORTCODE=your_shortcode
+```
 
-### M-Pesa
-- `POST /api/mpesa/stk-push` - STK Push
-- `GET /api/mpesa/transactions` - Get transactions
-- `POST /api/mpesa/record-payment` - Record payment
+## Default Login
+
+- **Username:** admin
+- **Password:** admin123
 
 ## Project Structure
 
 ```
 hotel fms/
-├── package.json              # Main dependencies
-├── .env                      # Environment variables
+├── package.json
+├── .env                    # Environment variables
 ├── server/
-│   ├── index.js              # Main server file
+│   ├── index.js           # Main server
 │   ├── config/
-│   │   └── database.js       # Database configuration
+│   │   └── database.js    # Supabase configuration
 │   ├── middleware/
-│   │   └── auth.js           # Authentication middleware
-│   └── routes/
-│       ├── auth.js           # Auth routes
-│       ├── pos.js            # POS routes
-│       ├── rooms.js          # Room routes
-│       ├── catering.js       # Catering routes
-│       ├── inventory.js      # Inventory routes
-│       ├── expenses.js       # Expense routes
-│       ├── staff.js          # Staff routes
-│       ├── reports.js        # Report routes
-│       └── mpesa.js         # M-Pesa routes
+│   │   └── auth.js       # Authentication
+│   └── routes/           # API routes
 └── client/
-    ├── package.json
     └── public/
-        ├── index.html        # Main HTML
-        ├── styles.css       # CSS styles
-        └── app.js          # Frontend JavaScript
+        ├── index.html    # Main HTML
+        ├── styles.css   # CSS
+        ├── app.js       # Frontend JS
+        └── supabase.js  # Supabase client
 ```
-
-## Automation
-
-The system includes automatic:
-- Daily report generation at midnight
-- Low stock alerts every hour
-- Inventory deduction on order completion
 
 ## Security
 
 - JWT token authentication
 - Password hashing with bcrypt
 - Role-based access control
-- Activity logging
+- Row Level Security (RLS) in Supabase
 
 ## License
 

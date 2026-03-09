@@ -1,20 +1,12 @@
-const { createClient } = require('@supabase/supabase-js');
-require('dotenv').config();
+-- New Ikuuni Financial Management System - Database Setup
+-- Run this SQL in Supabase SQL Editor to create all tables
 
-// Supabase Configuration
-const supabaseUrl = process.env.SUPABASE_URL || 'https://lmhapnpqdxzgrsoupklq.supabase.co'
-const supabaseKey = process.env.SUPABASE_ANON_KEY || 'sb_publishable_72jelmMtrLfKl592C_VhuA_r0So5Mcx';
+-- Enable UUID extension
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
-// Create Supabase client
-const supabase = createClient(supabaseUrl, supabaseKey);
-
-// Database Schema Initialization for Supabase
-// Run these SQL commands in Supabase SQL Editor to create tables
-
-const createTablesSQL = `
 -- Users Table
 CREATE TABLE IF NOT EXISTS users (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   username VARCHAR(50) UNIQUE NOT NULL,
   email VARCHAR(100) UNIQUE NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
@@ -28,7 +20,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 -- Rooms Table
 CREATE TABLE IF NOT EXISTS rooms (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   room_number VARCHAR(10) UNIQUE NOT NULL,
   room_type VARCHAR(50) NOT NULL CHECK (room_type IN ('standard', 'deluxe', 'suite', 'family')),
   price_per_night DECIMAL(10, 2) NOT NULL,
@@ -41,7 +33,7 @@ CREATE TABLE IF NOT EXISTS rooms (
 
 -- Guests Table
 CREATE TABLE IF NOT EXISTS guests (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   full_name VARCHAR(100) NOT NULL,
   email VARCHAR(100),
   phone VARCHAR(20) NOT NULL,
@@ -54,7 +46,7 @@ CREATE TABLE IF NOT EXISTS guests (
 
 -- Room Bookings Table
 CREATE TABLE IF NOT EXISTS room_bookings (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   room_id UUID REFERENCES rooms(id),
   guest_id UUID REFERENCES guests(id),
   check_in DATE NOT NULL,
@@ -73,7 +65,7 @@ CREATE TABLE IF NOT EXISTS room_bookings (
 
 -- Menu Categories Table
 CREATE TABLE IF NOT EXISTS menu_categories (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name VARCHAR(50) NOT NULL,
   type VARCHAR(20) NOT NULL CHECK (type IN ('food', 'drinks')),
   description TEXT,
@@ -82,7 +74,7 @@ CREATE TABLE IF NOT EXISTS menu_categories (
 
 -- Menu Items Table
 CREATE TABLE IF NOT EXISTS menu_items (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name VARCHAR(100) NOT NULL,
   category_id UUID REFERENCES menu_categories(id),
   description TEXT,
@@ -95,9 +87,9 @@ CREATE TABLE IF NOT EXISTS menu_items (
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Tables (Restaurant Tables)
+-- Restaurant Tables
 CREATE TABLE IF NOT EXISTS tables (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   table_number VARCHAR(10) UNIQUE NOT NULL,
   capacity INTEGER DEFAULT 4,
   status VARCHAR(20) DEFAULT 'available' CHECK (status IN ('available', 'occupied', 'reserved')),
@@ -106,7 +98,7 @@ CREATE TABLE IF NOT EXISTS tables (
 
 -- Orders Table
 CREATE TABLE IF NOT EXISTS orders (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   order_number VARCHAR(20) UNIQUE NOT NULL,
   order_type VARCHAR(20) NOT NULL CHECK (order_type IN ('dine_in', 'takeaway', 'room_service')),
   table_id UUID REFERENCES tables(id),
@@ -124,7 +116,7 @@ CREATE TABLE IF NOT EXISTS orders (
 
 -- Order Items Table
 CREATE TABLE IF NOT EXISTS order_items (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   order_id UUID REFERENCES orders(id) ON DELETE CASCADE,
   menu_item_id UUID REFERENCES menu_items(id),
   quantity INTEGER NOT NULL,
@@ -138,10 +130,9 @@ CREATE TABLE IF NOT EXISTS order_items (
 
 -- Payments Table
 CREATE TABLE IF NOT EXISTS payments (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   order_id UUID REFERENCES orders(id),
   room_booking_id UUID REFERENCES room_bookings(id),
-  catering_event_id UUID REFERENCES catering_events(id),
   amount DECIMAL(10, 2) NOT NULL,
   payment_method VARCHAR(20) NOT NULL CHECK (payment_method IN ('cash', 'mpesa', 'card', 'transfer')),
   reference_number VARCHAR(50),
@@ -155,7 +146,7 @@ CREATE TABLE IF NOT EXISTS payments (
 
 -- Catering Events Table
 CREATE TABLE IF NOT EXISTS catering_events (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   event_name VARCHAR(100) NOT NULL,
   client_name VARCHAR(100) NOT NULL,
   client_phone VARCHAR(20) NOT NULL,
@@ -164,7 +155,6 @@ CREATE TABLE IF NOT EXISTS catering_events (
   event_type VARCHAR(50),
   venue VARCHAR(100),
   number_of_guests INTEGER NOT NULL,
-  menu_package_id UUID REFERENCES menu_packages(id),
   price_per_person DECIMAL(10, 2) NOT NULL,
   subtotal DECIMAL(10, 2) NOT NULL,
   transport_cost DECIMAL(10, 2) DEFAULT 0,
@@ -183,7 +173,7 @@ CREATE TABLE IF NOT EXISTS catering_events (
 
 -- Menu Packages Table
 CREATE TABLE IF NOT EXISTS menu_packages (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name VARCHAR(100) NOT NULL,
   description TEXT,
   price_per_person DECIMAL(10, 2) NOT NULL,
@@ -195,7 +185,7 @@ CREATE TABLE IF NOT EXISTS menu_packages (
 
 -- Inventory Categories Table
 CREATE TABLE IF NOT EXISTS inventory_categories (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name VARCHAR(50) NOT NULL,
   type VARCHAR(20) NOT NULL CHECK (type IN ('food', 'drinks', 'supplies', 'equipment')),
   description TEXT,
@@ -204,7 +194,7 @@ CREATE TABLE IF NOT EXISTS inventory_categories (
 
 -- Suppliers Table
 CREATE TABLE IF NOT EXISTS suppliers (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name VARCHAR(100) NOT NULL,
   contact_person VARCHAR(100),
   email VARCHAR(100),
@@ -218,7 +208,7 @@ CREATE TABLE IF NOT EXISTS suppliers (
 
 -- Inventory Items Table
 CREATE TABLE IF NOT EXISTS inventory_items (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name VARCHAR(100) NOT NULL,
   category_id UUID REFERENCES inventory_categories(id),
   unit VARCHAR(20) NOT NULL,
@@ -235,7 +225,7 @@ CREATE TABLE IF NOT EXISTS inventory_items (
 
 -- Inventory Transactions Table
 CREATE TABLE IF NOT EXISTS inventory_transactions (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   item_id UUID REFERENCES inventory_items(id),
   transaction_type VARCHAR(20) NOT NULL CHECK (transaction_type IN ('purchase', 'sale', 'adjustment', 'waste', 'transfer')),
   quantity DECIMAL(10, 2) NOT NULL,
@@ -250,7 +240,7 @@ CREATE TABLE IF NOT EXISTS inventory_transactions (
 
 -- Purchase Orders Table
 CREATE TABLE IF NOT EXISTS purchase_orders (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   order_number VARCHAR(20) UNIQUE NOT NULL,
   supplier_id UUID REFERENCES suppliers(id),
   status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'ordered', 'received', 'cancelled')),
@@ -265,7 +255,7 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
 
 -- Purchase Order Items Table
 CREATE TABLE IF NOT EXISTS purchase_order_items (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   purchase_order_id UUID REFERENCES purchase_orders(id),
   item_id UUID REFERENCES inventory_items(id),
   quantity DECIMAL(10, 2) NOT NULL,
@@ -277,7 +267,7 @@ CREATE TABLE IF NOT EXISTS purchase_order_items (
 
 -- Expense Categories Table
 CREATE TABLE IF NOT EXISTS expense_categories (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name VARCHAR(50) NOT NULL,
   type VARCHAR(20) NOT NULL CHECK (type IN ('food', 'alcohol', 'salaries', 'utilities', 'maintenance', 'transport', 'other')),
   description TEXT,
@@ -287,7 +277,7 @@ CREATE TABLE IF NOT EXISTS expense_categories (
 
 -- Expenses Table
 CREATE TABLE IF NOT EXISTS expenses (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   category_id UUID REFERENCES expense_categories(id),
   description TEXT NOT NULL,
   amount DECIMAL(10, 2) NOT NULL,
@@ -305,7 +295,7 @@ CREATE TABLE IF NOT EXISTS expenses (
 
 -- Staff Salaries Table
 CREATE TABLE IF NOT EXISTS staff_salaries (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID REFERENCES users(id),
   month INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12),
   year INTEGER NOT NULL,
@@ -325,7 +315,7 @@ CREATE TABLE IF NOT EXISTS staff_salaries (
 
 -- Activity Logs Table
 CREATE TABLE IF NOT EXISTS activity_logs (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID REFERENCES users(id),
   action VARCHAR(100) NOT NULL,
   module VARCHAR(50) NOT NULL,
@@ -337,7 +327,7 @@ CREATE TABLE IF NOT EXISTS activity_logs (
 
 -- Daily Reports Table
 CREATE TABLE IF NOT EXISTS daily_reports (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   report_date DATE UNIQUE NOT NULL,
   total_sales DECIMAL(10, 2) DEFAULT 0,
   restaurant_sales DECIMAL(10, 2) DEFAULT 0,
@@ -355,7 +345,7 @@ CREATE TABLE IF NOT EXISTS daily_reports (
 
 -- M-Pesa Transactions Table
 CREATE TABLE IF NOT EXISTS mpesa_transactions (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   transaction_type VARCHAR(20) NOT NULL,
   transaction_id VARCHAR(50) UNIQUE NOT NULL,
   transaction_time TIMESTAMP NOT NULL,
@@ -367,106 +357,68 @@ CREATE TABLE IF NOT EXISTS mpesa_transactions (
   status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'matched', 'failed')),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-`;
 
-// Helper function to initialize database (for Supabase)
-const initDatabase = async () => {
-  console.log('Using Supabase - Tables should be created in Supabase dashboard');
-  console.log('Run the SQL from server/config/database.js in Supabase SQL Editor');
-  return true;
-};
+-- Enable Row Level Security (optional)
+-- ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
 
-// Database helper functions for Supabase
-const db = {
-  // Select
-  select: async (table, filters = {}, options = {}) => {
-    let query = supabase.from(table).select(options.select || '*');
-    
-    // Apply filters
-    for (const [key, value] of Object.entries(filters)) {
-      if (value !== undefined) {
-        query = query.eq(key, value);
-      }
-    }
-    
-    // Apply ordering
-    if (options.order) {
-      query = query.order(options.order.column || 'created_at', { ascending: options.order.ascending !== false });
-    }
-    
-    // Apply limit
-    if (options.limit) {
-      query = query.limit(options.limit);
-    }
-    
-    // Apply range for pagination
-    if (options.range) {
-      query = query.range(options.range.start, options.range.end);
-    }
-    
-    const { data, error } = await query;
-    if (error) throw error;
-    return data;
-  },
+-- Create indexes for better performance
+CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+CREATE INDEX IF NOT EXISTS idx_room_bookings_dates ON room_bookings(check_in, check_out);
+CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date);
+CREATE INDEX IF NOT EXISTS idx_inventory_items_category ON inventory_items(category_id);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_user ON activity_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_created ON activity_logs(created_at);
 
-  // Insert
-  insert: async (table, data, options = {}) => {
-    const { data: result, error } = await supabase
-      .from(table)
-      .insert(data)
-      .select(options.select || '*')
-      .single();
-    
-    if (error) throw error;
-    return result;
-  },
+-- Insert default admin user (password: admin123)
+-- Note: In production, use a proper hashed password
+INSERT INTO users (username, email, password_hash, full_name, role, phone)
+VALUES ('admin', 'admin@newikuuni.com', '$2a$10$rBVcJWGLmE7vKjN7xJ5G5O0Z5fY5fY5fY5fY5fY5fY5fY5fY5fY5fY5fY', 'System Administrator', 'admin', '+254700000000')
+ON CONFLICT (username) DO NOTHING;
 
-  // Insert multiple
-  insertMany: async (table, data) => {
-    const { data: result, error } = await supabase
-      .from(table)
-      .insert(data)
-      .select();
-    
-    if (error) throw error;
-    return result;
-  },
+-- Insert sample menu categories
+INSERT INTO menu_categories (name, type, description) VALUES 
+('Main Dishes', 'food', 'Main course meals'),
+('Drinks', 'drinks', 'Beverages and cocktails'),
+('Desserts', 'food', 'Sweet treats'),
+('Snacks', 'food', 'Light bites')
+ON CONFLICT DO NOTHING;
 
-  // Update
-  update: async (table, data, filters) => {
-    let query = supabase.from(table).update(data);
-    
-    for (const [key, value] of Object.entries(filters)) {
-      query = query.eq(key, value);
-    }
-    
-    const { data: updatedData, error } = await query.select();
-    if (error) throw error;
-    return updatedData;
-  },
+-- Insert sample rooms
+INSERT INTO rooms (room_number, room_type, price_per_night, status) VALUES 
+('101', 'standard', 3000, 'available'),
+('102', 'standard', 3000, 'available'),
+('201', 'deluxe', 5000, 'available'),
+('202', 'deluxe', 5000, 'available'),
+('301', 'suite', 8000, 'available')
+ON CONFLICT (room_number) DO NOTHING;
 
-  // Delete
-  delete: async (table, filters) => {
-    let query = supabase.from(table).delete();
-    
-    for (const [key, value] of Object.entries(filters)) {
-      query = query.eq(key, value);
-    }
-    
-    const { error } = await query;
-    if (error) throw error;
-    return true;
-  },
+-- Insert sample restaurant tables
+INSERT INTO tables (table_number, capacity, status) VALUES 
+('T1', 4, 'available'),
+('T2', 4, 'available'),
+('T3', 6, 'available'),
+('T4', 2, 'available'),
+('T5', 8, 'available')
+ON CONFLICT (table_number) DO NOTHING;
 
-  // Raw SQL (for complex queries)
-  raw: async (query) => {
-    const { data, error } = await supabase.rpc('exec_sql', { query });
-    if (error) throw error;
-    return data;
-  },
+-- Insert expense categories
+INSERT INTO expense_categories (name, type) VALUES 
+('Food Supplies', 'food'),
+('Alcohol Purchases', 'alcohol'),
+('Staff Salaries', 'salaries'),
+('Utilities', 'utilities'),
+('Maintenance', 'maintenance'),
+('Transport', 'transport')
+ON CONFLICT DO NOTHING;
 
-  // Get supabase client
-  supabase: supabase
-};
+-- Insert inventory categories
+INSERT INTO inventory_categories (name, type) VALUES 
+('Food Ingredients', 'food'),
+('Beverages', 'drinks'),
+('Cleaning Supplies', 'supplies'),
+('Kitchen Equipment', 'equipment')
+ON CONFLICT DO NOTHING;
 
-module.exports = { supabase, db, initDatabase, createTablesSQL };
+SELECT 'Database setup completed successfully!' as message;

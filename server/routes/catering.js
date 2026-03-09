@@ -1,15 +1,19 @@
 const express = require('express');
 const router = express.Router();
-const { pool } = require('../config/database');
+const { supabase, db } = require('../config/database');
 const { authenticateToken, authorize, logActivity } = require('../middleware/auth');
 
 // Get all menu packages
 router.get('/packages', authenticateToken, async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT * FROM menu_packages WHERE is_active = true ORDER BY name`
-    );
-    res.json({ packages: result.rows });
+    const { data: packages, error } = await supabase
+      .from('menu_packages')
+      .select('*')
+      .eq('is_active', true)
+      .order('name');
+
+    if (error) throw error;
+    res.json({ packages });
   } catch (error) {
     console.error('Get packages error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -21,14 +25,22 @@ router.post('/packages', authenticateToken, authorize('admin', 'manager'), async
   try {
     const { name, description, price_per_person, menu_items } = req.body;
 
-    const result = await pool.query(
-      `INSERT INTO menu_packages (name, description, price_per_person, menu_items)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [name, description, price_per_person, JSON.stringify(menu_items || [])]
-    );
+    const { data: pkg, error } = await supabase
+      .from('menu_packages')
+      .insert({
+        name,
+        description,
+        price_per_person,
+        menu_items: menu_items || [],
+        is_active: true
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
 
     await logActivity(req.user.id, 'CREATE', 'catering', `Created menu package: ${name}`, req);
-    res.status(201).json({ package: result.rows[0] });
+    res.status(201).json({ package: pkg });
   } catch (error) {
     console.error('Create package error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -40,33 +52,19 @@ router.get('/events', authenticateToken, async (req, res) => {
   try {
     const { status, from_date, to_date } = req.query;
     
-    let query = `
-      SELECT ce.*, mp.name as package_name, u.full_name as created_by_name
-      FROM catering_events ce
-      LEFT JOIN menu_packages mp ON ce.menu_package_id = mp.id
-      LEFT JOIN users u ON ce.created_by = u.id
-      WHERE 1=1
-    `;
-    const values = [];
-    let paramCount = 1;
+    let query = supabase
+      .from('catering_events')
+      .select('*, menu_packages(name), users!catering_events_created_by_fkey(full_name)')
+      .order('event_date', { ascending: false });
 
-    if (status) {
-      query += ` AND ce.status = $${paramCount++}`;
-      values.push(status);
-    }
-    if (from_date) {
-      query += ` AND ce.event_date >= $${paramCount++}`;
-      values.push(from_date);
-    }
-    if (to_date) {
-      query += ` AND ce.event_date <= $${paramCount++}`;
-      values.push(to_date);
-    }
+    if (status) query = query.eq('status', status);
+    if (from_date) query = query.gte('event_date', from_date);
+    if (to_date) query = query.lte('event_date', to_date);
 
-    query += ` ORDER BY ce.event_date DESC`;
+    const { data: events, error } = await query;
 
-    const result = await pool.query(query, values);
-    res.json({ events: result.rows });
+    if (error) throw error;
+    res.json({ events });
   } catch (error) {
     console.error('Get events error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -87,23 +85,34 @@ router.post('/events', authenticateToken, async (req, res) => {
     const total_cost = (transport_cost || 0) + (staff_cost || 0);
     const total_amount = subtotal;
 
-    const result = await pool.query(
-      `INSERT INTO catering_events (
-        event_name, client_name, client_phone, client_email,
-        event_date, event_type, venue, number_of_guests,
-        menu_package_id, price_per_person, subtotal, transport_cost,
-        staff_cost, total_cost, total_amount, notes, created_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING *`,
-      [
-        event_name, client_name, client_phone, client_email,
-        event_date, event_type, venue, number_of_guests,
-        menu_package_id, price_per_person, subtotal, transport_cost || 0,
-        staff_cost || 0, total_cost, total_amount, notes, req.user.id
-      ]
-    );
+    const { data: event, error } = await supabase
+      .from('catering_events')
+      .insert({
+        event_name,
+        client_name,
+        client_phone,
+        client_email,
+        event_date,
+        event_type,
+        venue,
+        number_of_guests,
+        menu_package_id,
+        price_per_person,
+        subtotal,
+        transport_cost: transport_cost || 0,
+        staff_cost: staff_cost || 0,
+        total_cost,
+        total_amount,
+        notes,
+        created_by: req.user.id
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
 
     await logActivity(req.user.id, 'CREATE', 'catering', `Created catering event: ${event_name}`, req);
-    res.status(201).json({ event: result.rows[0] });
+    res.status(201).json({ event });
   } catch (error) {
     console.error('Create event error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -114,111 +123,100 @@ router.post('/events', authenticateToken, async (req, res) => {
 router.put('/events/:id', authenticateToken, authorize('admin', 'manager'), async (req, res) => {
   try {
     const { id } = req.params;
-    const updates = [];
-    const values = [];
-    let paramCount = 1;
+    const {
+      event_name, client_name, client_phone, client_email,
+      event_date, event_type, venue, number_of_guests,
+      menu_package_id, price_per_person, transport_cost, staff_cost,
+      status, notes
+    } = req.body;
 
-    const fields = [
-      'event_name', 'client_name', 'client_phone', 'client_email',
-      'event_date', 'event_type', 'venue', 'number_of_guests',
-      'menu_package_id', 'price_per_person', 'transport_cost', 'staff_cost',
-      'status', 'notes'
-    ];
-
-    for (const field of fields) {
-      if (req.body[field] !== undefined) {
-        updates.push(`${field} = $${paramCount++}`);
-        values.push(req.body[field]);
-      }
-    }
+    const updates = {};
+    if (event_name) updates.event_name = event_name;
+    if (client_name) updates.client_name = client_name;
+    if (client_phone) updates.client_phone = client_phone;
+    if (client_email) updates.client_email = client_email;
+    if (event_date) updates.event_date = event_date;
+    if (event_type) updates.event_type = event_type;
+    if (venue) updates.venue = venue;
+    if (number_of_guests) updates.number_of_guests = number_of_guests;
+    if (menu_package_id) updates.menu_package_id = menu_package_id;
+    if (price_per_person) updates.price_per_person = price_per_person;
+    if (transport_cost !== undefined) updates.transport_cost = transport_cost;
+    if (staff_cost !== undefined) updates.staff_cost = staff_cost;
+    if (status) updates.status = status;
+    if (notes !== undefined) updates.notes = notes;
+    updates.updated_at = new Date().toISOString();
 
     // Recalculate totals if relevant fields changed
-    if (req.body.number_of_guests || req.body.price_per_person) {
-      const current = await pool.query(`SELECT * FROM catering_events WHERE id = $1`, [id]);
-      if (current.rows.length > 0) {
-        const c = current.rows[0];
-        const guests = req.body.number_of_guests || c.number_of_guests;
-        const price = req.body.price_per_person || c.price_per_person;
-        const subtotal = guests * price;
-        
-        updates.push(`subtotal = $${paramCount++}`);
-        values.push(subtotal);
-        updates.push(`total_amount = $${paramCount++}`);
-        values.push(subtotal);
+    if (number_of_guests || price_per_person) {
+      const { data: current } = await supabase
+        .from('catering_events')
+        .select('number_of_guests, price_per_person')
+        .eq('id', id)
+        .single();
+      
+      if (current) {
+        const guests = number_of_guests || current.number_of_guests;
+        const price = price_per_person || current.price_per_person;
+        updates.subtotal = guests * price;
+        updates.total_amount = guests * price;
       }
     }
 
-    updates.push(`updated_at = CURRENT_TIMESTAMP`);
-    values.push(id);
+    const { data: event, error } = await supabase
+      .from('catering_events')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
 
-    const result = await pool.query(
-      `UPDATE catering_events SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`,
-      values
-    );
-
-    if (result.rows.length === 0) {
+    if (error) throw error;
+    if (!event) {
       return res.status(404).json({ error: 'Event not found' });
     }
 
     await logActivity(req.user.id, 'UPDATE', 'catering', `Updated catering event: ${id}`, req);
-    res.json({ event: result.rows[0] });
+    res.json({ event });
   } catch (error) {
     console.error('Update event error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Assign staff to event
-router.post('/events/:id/staff', authenticateToken, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { staff_ids, role } = req.body;
-
-    for (const staff_id of staff_ids) {
-      await pool.query(
-        `INSERT INTO catering_staff (event_id, user_id, role)
-         VALUES ($1, $2, $3)`,
-        [id, staff_id, role || 'staff']
-      );
-    }
-
-    await logActivity(req.user.id, 'ASSIGN', 'catering', `Assigned staff to event: ${id}`, req);
-    res.json({ message: 'Staff assigned successfully' });
-  } catch (error) {
-    console.error('Assign staff error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
 // Record payment for event
 router.post('/events/:id/payment', authenticateToken, async (req, res) => {
-  const client = await pool.connect();
-  
   try {
-    await client.query('BEGIN');
-
     const { id } = req.params;
     const { amount, payment_method, reference_number, mpesa_receipt, notes } = req.body;
 
     // Get current event
-    const eventResult = await client.query(
-      `SELECT * FROM catering_events WHERE id = $1`,
-      [id]
-    );
+    const { data: event, error: eventError } = await supabase
+      .from('catering_events')
+      .select('*')
+      .eq('id', id)
+      .single();
 
-    if (eventResult.rows.length === 0) {
+    if (eventError || !event) {
       return res.status(404).json({ error: 'Event not found' });
     }
 
-    const event = eventResult.rows[0];
-    const newPaidAmount = parseFloat(event.paid_amount) + parseFloat(amount);
+    const newPaidAmount = parseFloat(event.paid_amount || 0) + parseFloat(amount);
 
     // Create payment
-    await client.query(
-      `INSERT INTO payments (catering_event_id, amount, payment_method, reference_number, mpesa_receipt, processed_by, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [id, amount, payment_method, reference_number, mpesa_receipt, req.user.id, notes]
-    );
+    const { error: paymentError } = await supabase
+      .from('payments')
+      .insert({
+        catering_event_id: id,
+        amount,
+        payment_method,
+        reference_number,
+        mpesa_receipt,
+        processed_by: req.user.id,
+        notes,
+        status: 'completed'
+      });
+
+    if (paymentError) throw paymentError;
 
     // Update event payment status
     let paymentStatus = 'partial';
@@ -226,26 +224,30 @@ router.post('/events/:id/payment', authenticateToken, async (req, res) => {
       paymentStatus = 'paid';
     }
 
-    await client.query(
-      `UPDATE catering_events SET paid_amount = $1, payment_status = $2 WHERE id = $3`,
-      [newPaidAmount, paymentStatus, id]
-    );
-
-    await client.query('COMMIT');
+    await supabase
+      .from('catering_events')
+      .update({ 
+        paid_amount: newPaidAmount, 
+        payment_status: paymentStatus,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id);
 
     await logActivity(req.user.id, 'PAYMENT', 'catering', `Payment for event: ${event.event_name}`, req);
 
-    const updatedEvent = await pool.query(`SELECT * FROM catering_events WHERE id = $1`, [id]);
+    const { data: updatedEvent } = await supabase
+      .from('catering_events')
+      .select('*')
+      .eq('id', id)
+      .single();
+
     res.json({ 
       message: 'Payment recorded successfully',
-      event: updatedEvent.rows[0]
+      event: updatedEvent
     });
   } catch (error) {
-    await client.query('ROLLBACK');
     console.error('Payment error:', error);
     res.status(500).json({ error: 'Internal server error' });
-  } finally {
-    client.release();
   }
 });
 
@@ -254,18 +256,23 @@ router.post('/events/:id/complete', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
 
-    const result = await pool.query(
-      `UPDATE catering_events SET status = 'completed', updated_at = CURRENT_TIMESTAMP
-       WHERE id = $1 RETURNING *`,
-      [id]
-    );
+    const { data: event, error } = await supabase
+      .from('catering_events')
+      .update({ 
+        status: 'completed', 
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
 
-    if (result.rows.length === 0) {
+    if (error) throw error;
+    if (!event) {
       return res.status(404).json({ error: 'Event not found' });
     }
 
     await logActivity(req.user.id, 'COMPLETE', 'catering', `Completed event: ${id}`, req);
-    res.json({ event: result.rows[0] });
+    res.json({ event });
   } catch (error) {
     console.error('Complete event error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -275,17 +282,33 @@ router.post('/events/:id/complete', authenticateToken, async (req, res) => {
 // Get catering statistics
 router.get('/stats', authenticateToken, async (req, res) => {
   try {
-    const stats = await pool.query(
-      `SELECT 
-        COUNT(*) FILTER (WHERE status = 'booked') as booked_events,
-        COUNT(*) FILTER (WHERE status = 'completed') as completed_events,
-        COUNT(*) FILTER (WHERE event_date = CURRENT_DATE) as today_events,
-        COALESCE(SUM(total_amount) FILTER (WHERE status = 'completed'), 0) as total_revenue,
-        COALESCE(SUM(paid_amount) FILTER (WHERE status != 'cancelled'), 0) as collected_amount
-       FROM catering_events`
-    );
+    const { data: events } = await supabase
+      .from('catering_events')
+      .select('status, event_date, total_amount, paid_amount');
 
-    res.json({ stats: stats.rows[0] });
+    const bookedEvents = events.filter(e => e.status === 'booked').length;
+    const completedEvents = events.filter(e => e.status === 'completed').length;
+    
+    const today = new Date().toISOString().slice(0, 10);
+    const todayEvents = events.filter(e => e.event_date === today).length;
+    
+    const totalRevenue = events
+      .filter(e => e.status === 'completed')
+      .reduce((sum, e) => sum + parseFloat(e.total_amount || 0), 0);
+    
+    const collectedAmount = events
+      .filter(e => e.status !== 'cancelled')
+      .reduce((sum, e) => sum + parseFloat(e.paid_amount || 0), 0);
+
+    res.json({
+      stats: {
+        booked_events: bookedEvents,
+        completed_events: completedEvents,
+        today_events: todayEvents,
+        total_revenue: totalRevenue,
+        collected_amount: collectedAmount
+      }
+    });
   } catch (error) {
     console.error('Get catering stats error:', error);
     res.status(500).json({ error: 'Internal server error' });

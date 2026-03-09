@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { pool } = require('../config/database');
+const { supabase, db } = require('../config/database');
 const { 
   hashPassword, 
   comparePassword, 
@@ -18,17 +18,18 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Username and password required' });
     }
 
-    const result = await pool.query(
-      `SELECT id, username, email, password_hash, full_name, role, is_active 
-       FROM users WHERE username = $1 OR email = $1`,
-      [username]
-    );
+    const { data: users, error } = await supabase
+      .from('users')
+      .select('id, username, email, password_hash, full_name, role, is_active')
+      .or(`username.eq.${username},email.eq.${username}`);
 
-    if (result.rows.length === 0) {
+    if (error) throw error;
+
+    if (!users || users.length === 0) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    const user = result.rows[0];
+    const user = users[0];
 
     if (!user.is_active) {
       return res.status(401).json({ error: 'Account is deactivated' });
@@ -80,29 +81,37 @@ router.post('/register', authenticateToken, async (req, res) => {
     }
 
     // Check if user exists
-    const existingUser = await pool.query(
-      `SELECT id FROM users WHERE username = $1 OR email = $2`,
-      [username, email]
-    );
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('id')
+      .or(`username.eq.${username},email.eq.${email}`);
 
-    if (existingUser.rows.length > 0) {
+    if (existingUser && existingUser.length > 0) {
       return res.status(400).json({ error: 'Username or email already exists' });
     }
 
     const passwordHash = await hashPassword(password);
 
-    const result = await pool.query(
-      `INSERT INTO users (username, email, password_hash, full_name, role, phone)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, username, email, full_name, role, phone, created_at`,
-      [username, email, passwordHash, full_name, role, phone]
-    );
+    const { data: newUser, error: insertError } = await supabase
+      .from('users')
+      .insert({
+        username,
+        email,
+        password_hash: passwordHash,
+        full_name,
+        role,
+        phone
+      })
+      .select('id, username, email, full_name, role, phone, created_at')
+      .single();
+
+    if (insertError) throw insertError;
 
     await logActivity(req.user.id, 'CREATE_USER', 'auth', `Created user: ${username}`, req);
 
     res.status(201).json({
       message: 'User created successfully',
-      user: result.rows[0]
+      user: newUser
     });
   } catch (error) {
     console.error('Registration error:', error);
@@ -113,17 +122,19 @@ router.post('/register', authenticateToken, async (req, res) => {
 // Get Current User
 router.get('/me', authenticateToken, async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT id, username, email, full_name, role, phone, is_active, created_at
-       FROM users WHERE id = $1`,
-      [req.user.id]
-    );
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('id, username, email, full_name, role, phone, is_active, created_at')
+      .eq('id', req.user.id)
+      .single();
 
-    if (result.rows.length === 0) {
+    if (error) throw error;
+
+    if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    res.json({ user: result.rows[0] });
+    res.json({ user });
   } catch (error) {
     console.error('Get user error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -133,12 +144,14 @@ router.get('/me', authenticateToken, async (req, res) => {
 // Get All Users (Admin/Manager)
 router.get('/users', authenticateToken, async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT id, username, email, full_name, role, phone, is_active, created_at
-       FROM users ORDER BY created_at DESC`
-    );
+    const { data: users, error } = await supabase
+      .from('users')
+      .select('id, username, email, full_name, role, phone, is_active, created_at')
+      .order('created_at', { ascending: false });
 
-    res.json({ users: result.rows });
+    if (error) throw error;
+
+    res.json({ users });
   } catch (error) {
     console.error('Get users error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -156,47 +169,30 @@ router.put('/users/:id', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Unauthorized' });
     }
 
-    const updates = [];
-    const values = [];
-    let paramCount = 1;
+    const updates = {};
+    if (email) updates.email = email;
+    if (full_name) updates.full_name = full_name;
+    if (phone) updates.phone = phone;
+    if (role && req.user.role === 'admin') updates.role = role;
+    if (is_active !== undefined && req.user.role === 'admin') updates.is_active = is_active;
+    updates.updated_at = new Date().toISOString();
 
-    if (email) {
-      updates.push(`email = $${paramCount++}`);
-      values.push(email);
-    }
-    if (full_name) {
-      updates.push(`full_name = $${paramCount++}`);
-      values.push(full_name);
-    }
-    if (phone) {
-      updates.push(`phone = $${paramCount++}`);
-      values.push(phone);
-    }
-    if (role && req.user.role === 'admin') {
-      updates.push(`role = $${paramCount++}`);
-      values.push(role);
-    }
-    if (is_active !== undefined && req.user.role === 'admin') {
-      updates.push(`is_active = $${paramCount++}`);
-      values.push(is_active);
-    }
+    const { data: updatedUser, error } = await supabase
+      .from('users')
+      .update(updates)
+      .eq('id', id)
+      .select('id, username, email, full_name, role, phone, is_active')
+      .single();
 
-    updates.push(`updated_at = CURRENT_TIMESTAMP`);
-    values.push(id);
+    if (error) throw error;
 
-    const result = await pool.query(
-      `UPDATE users SET ${updates.join(', ')} WHERE id = $${paramCount}
-       RETURNING id, username, email, full_name, role, phone, is_active`,
-      values
-    );
-
-    if (result.rows.length === 0) {
+    if (!updatedUser) {
       return res.status(404).json({ error: 'User not found' });
     }
 
     await logActivity(req.user.id, 'UPDATE_USER', 'auth', `Updated user: ${id}`, req);
 
-    res.json({ user: result.rows[0], message: 'User updated successfully' });
+    res.json({ user: updatedUser, message: 'User updated successfully' });
   } catch (error) {
     console.error('Update user error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -212,22 +208,27 @@ router.post('/change-password', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Current and new password required' });
     }
 
-    const result = await pool.query(
-      `SELECT password_hash FROM users WHERE id = $1`,
-      [req.user.id]
-    );
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('password_hash')
+      .eq('id', req.user.id)
+      .single();
 
-    const isValid = await comparePassword(current_password, result.rows[0].password_hash);
+    if (error) throw error;
+
+    const isValid = await comparePassword(current_password, user.password_hash);
     if (!isValid) {
       return res.status(401).json({ error: 'Current password is incorrect' });
     }
 
     const newHash = await hashPassword(new_password);
 
-    await pool.query(
-      `UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
-      [newHash, req.user.id]
-    );
+    const { error: updateError } = await supabase
+      .from('users')
+      .update({ password_hash: newHash, updated_at: new Date().toISOString() })
+      .eq('id', req.user.id);
+
+    if (updateError) throw updateError;
 
     await logActivity(req.user.id, 'CHANGE_PASSWORD', 'auth', 'Password changed', req);
 
@@ -257,17 +258,32 @@ router.get('/activity-logs', authenticateToken, async (req, res) => {
     }
 
     const { limit = 50, offset = 0 } = req.query;
+    const limitNum = parseInt(limit) || 50;
+    const offsetNum = parseInt(offset) || 0;
 
-    const result = await pool.query(
-      `SELECT al.*, u.username, u.full_name 
-       FROM activity_logs al
-       LEFT JOIN users u ON al.user_id = u.id
-       ORDER BY al.created_at DESC
-       LIMIT $1 OFFSET $2`,
-      [limit, offset]
-    );
+    const { data: logs, error } = await supabase
+      .from('activity_logs')
+      .select('*, users(username, full_name)')
+      .order('created_at', { ascending: false })
+      .range(offsetNum, offsetNum + limitNum - 1);
 
-    res.json({ logs: result.rows });
+    if (error) throw error;
+
+    // Transform to add username manually since nested select doesn't work well
+    const { data: users } = await supabase
+      .from('users')
+      .select('id, username, full_name');
+
+    const logsWithUser = logs.map(log => {
+      const user = users.find(u => u.id === log.user_id);
+      return {
+        ...log,
+        username: user?.username,
+        full_name: user?.full_name
+      };
+    });
+
+    res.json({ logs: logsWithUser });
   } catch (error) {
     console.error('Get activity logs error:', error);
     res.status(500).json({ error: 'Internal server error' });

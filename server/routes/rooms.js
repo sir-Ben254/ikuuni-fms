@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { pool } = require('../config/database');
+const { supabase, db } = require('../config/database');
 const { authenticateToken, authorize, logActivity } = require('../middleware/auth');
 
 // Get all rooms
@@ -8,18 +8,16 @@ router.get('/', authenticateToken, async (req, res) => {
   try {
     const { status } = req.query;
     
-    let query = `SELECT * FROM rooms`;
-    const values = [];
+    let query = supabase
+      .from('rooms')
+      .select('*');
 
-    if (status) {
-      query += ` WHERE status = $1`;
-      values.push(status);
-    }
+    if (status) query = query.eq('status', status);
 
-    query += ` ORDER BY room_number`;
+    const { data: rooms, error } = await query.order('room_number');
 
-    const result = await pool.query(query, values);
-    res.json({ rooms: result.rows });
+    if (error) throw error;
+    res.json({ rooms });
   } catch (error) {
     console.error('Get rooms error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -31,14 +29,22 @@ router.post('/', authenticateToken, authorize('admin', 'manager'), async (req, r
   try {
     const { room_number, room_type, price_per_night, amenities, description } = req.body;
 
-    const result = await pool.query(
-      `INSERT INTO rooms (room_number, room_type, price_per_night, amenities, description)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [room_number, room_type, price_per_night, amenities || [], description]
-    );
+    const { data: room, error } = await supabase
+      .from('rooms')
+      .insert({
+        room_number,
+        room_type,
+        price_per_night,
+        amenities: amenities || [],
+        description
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
 
     await logActivity(req.user.id, 'CREATE', 'rooms', `Created room: ${room_number}`, req);
-    res.status(201).json({ room: result.rows[0] });
+    res.status(201).json({ room });
   } catch (error) {
     console.error('Create room error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -51,25 +57,29 @@ router.put('/:id', authenticateToken, authorize('admin', 'manager'), async (req,
     const { id } = req.params;
     const { room_number, room_type, price_per_night, status, amenities, description } = req.body;
 
-    const result = await pool.query(
-      `UPDATE rooms 
-       SET room_number = COALESCE($1, room_number), 
-           room_type = COALESCE($2, room_type),
-           price_per_night = COALESCE($3, price_per_night),
-           status = COALESCE($4, status),
-           amenities = COALESCE($5, amenities),
-           description = COALESCE($6, description),
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $7 RETURNING *`,
-      [room_number, room_type, price_per_night, status, amenities, description, id]
-    );
+    const updates = {};
+    if (room_number) updates.room_number = room_number;
+    if (room_type) updates.room_type = room_type;
+    if (price_per_night) updates.price_per_night = price_per_night;
+    if (status) updates.status = status;
+    if (amenities) updates.amenities = amenities;
+    if (description !== undefined) updates.description = description;
+    updates.updated_at = new Date().toISOString();
 
-    if (result.rows.length === 0) {
+    const { data: room, error } = await supabase
+      .from('rooms')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    if (!room) {
       return res.status(404).json({ error: 'Room not found' });
     }
 
     await logActivity(req.user.id, 'UPDATE', 'rooms', `Updated room: ${id}`, req);
-    res.json({ room: result.rows[0] });
+    res.json({ room });
   } catch (error) {
     console.error('Update room error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -81,18 +91,29 @@ router.get('/availability', authenticateToken, async (req, res) => {
   try {
     const { check_in, check_out } = req.query;
 
-    const result = await pool.query(
-      `SELECT r.*, 
-       CASE WHEN rb.id IS NULL THEN true ELSE false END as is_available
-       FROM rooms r
-       LEFT JOIN room_bookings rb ON r.id = rb.room_id 
-         AND rb.payment_status != 'cancelled'
-         AND (rb.check_in, rb.check_out) OVERLAPS ($1::date, $2::date)
-       ORDER BY r.room_number`,
-      [check_in, check_out]
-    );
+    // Get all rooms
+    const { data: rooms } = await supabase
+      .from('rooms')
+      .select('*')
+      .order('room_number');
 
-    res.json({ rooms: result.rows });
+    // Get bookings that overlap with the requested dates
+    const { data: bookings } = await supabase
+      .from('room_bookings')
+      .select('room_id')
+      .neq('payment_status', 'cancelled')
+      .lte('check_in', check_out)
+      .gte('check_out', check_in);
+
+    const bookedRoomIds = new Set(bookings.map(b => b.room_id));
+
+    // Mark rooms as available or not
+    const roomsWithAvailability = rooms.map(room => ({
+      ...room,
+      is_available: !bookedRoomIds.has(room.id)
+    }));
+
+    res.json({ rooms: roomsWithAvailability });
   } catch (error) {
     console.error('Get availability error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -102,10 +123,13 @@ router.get('/availability', authenticateToken, async (req, res) => {
 // Get all guests
 router.get('/guests', authenticateToken, async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT * FROM guests ORDER BY created_at DESC`
-    );
-    res.json({ guests: result.rows });
+    const { data: guests, error } = await supabase
+      .from('guests')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.json({ guests });
   } catch (error) {
     console.error('Get guests error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -117,13 +141,21 @@ router.post('/guests', authenticateToken, async (req, res) => {
   try {
     const { full_name, email, phone, id_number, address, nationality } = req.body;
 
-    const result = await pool.query(
-      `INSERT INTO guests (full_name, email, phone, id_number, address, nationality)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [full_name, email, phone, id_number, address, nationality]
-    );
+    const { data: guest, error } = await supabase
+      .from('guests')
+      .insert({
+        full_name,
+        email,
+        phone,
+        id_number,
+        address,
+        nationality
+      })
+      .select()
+      .single();
 
-    res.status(201).json({ guest: result.rows[0] });
+    if (error) throw error;
+    res.status(201).json({ guest });
   } catch (error) {
     console.error('Create guest error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -132,35 +164,18 @@ router.post('/guests', authenticateToken, async (req, res) => {
 
 // Create booking
 router.post('/bookings', authenticateToken, async (req, res) => {
-  const client = await pool.connect();
-  
   try {
-    await client.query('BEGIN');
-
     const { room_id, guest_id, check_in, check_out, number_of_guests, payment_method, mpesa_receipt, notes } = req.body;
 
     // Get room price
-    const roomResult = await client.query(
-      `SELECT * FROM rooms WHERE id = $1`,
-      [room_id]
-    );
+    const { data: room, error: roomError } = await supabase
+      .from('rooms')
+      .select('*')
+      .eq('id', room_id)
+      .single();
 
-    if (roomResult.rows.length === 0) {
+    if (roomError || !room) {
       return res.status(404).json({ error: 'Room not found' });
-    }
-
-    const room = roomResult.rows[0];
-
-    // Check availability
-    const availabilityResult = await client.query(
-      `SELECT id FROM room_bookings 
-       WHERE room_id = $1 AND payment_status != 'cancelled'
-       AND (check_in, check_out) OVERLAPS ($2::date, $3::date)`,
-      [room_id, check_in, check_out]
-    );
-
-    if (availabilityResult.rows.length > 0) {
-      return res.status(400).json({ error: 'Room is not available for selected dates' });
     }
 
     // Calculate nights and total
@@ -170,56 +185,64 @@ router.post('/bookings', authenticateToken, async (req, res) => {
     const totalAmount = room.price_per_night * nights;
 
     // Create booking
-    const bookingResult = await client.query(
-      `INSERT INTO room_bookings (room_id, guest_id, check_in, check_out, number_of_guests, total_amount, payment_method, mpesa_receipt, notes, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
-      [room_id, guest_id, check_in, check_out, number_of_guests || 1, totalAmount, payment_method, mpesa_receipt, notes, req.user.id]
-    );
+    const { data: booking, error: bookingError } = await supabase
+      .from('room_bookings')
+      .insert({
+        room_id,
+        guest_id,
+        check_in,
+        check_out,
+        number_of_guests: number_of_guests || 1,
+        total_amount: totalAmount,
+        payment_method,
+        mpesa_receipt,
+        notes,
+        created_by: req.user.id
+      })
+      .select()
+      .single();
 
-    const booking = bookingResult.rows[0];
+    if (bookingError) throw bookingError;
 
     // If payment made, record payment and update room status
     if (payment_method) {
       const paymentAmount = totalAmount;
       
-      await client.query(
-        `INSERT INTO payments (room_booking_id, amount, payment_method, mpesa_receipt, processed_by)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [booking.id, paymentAmount, payment_method, mpesa_receipt, req.user.id]
-      );
+      await supabase
+        .from('payments')
+        .insert({
+          room_booking_id: booking.id,
+          amount: paymentAmount,
+          payment_method,
+          mpesa_receipt,
+          processed_by: req.user.id,
+          status: 'completed'
+        });
 
-      await client.query(
-        `UPDATE room_bookings SET payment_status = 'paid', paid_amount = $1 WHERE id = $2`,
-        [paymentAmount, booking.id]
-      );
+      await supabase
+        .from('room_bookings')
+        .update({ payment_status: 'paid', paid_amount: paymentAmount })
+        .eq('id', booking.id);
 
-      await client.query(
-        `UPDATE rooms SET status = 'occupied' WHERE id = $1`,
-        [room_id]
-      );
+      await supabase
+        .from('rooms')
+        .update({ status: 'occupied' })
+        .eq('id', room_id);
     }
-
-    await client.query('COMMIT');
 
     await logActivity(req.user.id, 'CREATE', 'bookings', `Created room booking for room ${room.room_number}`, req);
 
     // Get full booking details
-    const fullBooking = await pool.query(
-      `SELECT rb.*, r.room_number, r.room_type, g.full_name as guest_name, g.phone as guest_phone
-       FROM room_bookings rb
-       JOIN rooms r ON rb.room_id = r.id
-       JOIN guests g ON rb.guest_id = g.id
-       WHERE rb.id = $1`,
-      [booking.id]
-    );
+    const { data: fullBooking } = await supabase
+      .from('room_bookings')
+      .select('*, rooms(room_number, room_type), guests(full_name, phone)')
+      .eq('id', booking.id)
+      .single();
 
-    res.status(201).json({ booking: fullBooking.rows[0] });
+    res.status(201).json({ booking: fullBooking });
   } catch (error) {
-    await client.query('ROLLBACK');
     console.error('Create booking error:', error);
     res.status(500).json({ error: 'Internal server error' });
-  } finally {
-    client.release();
   }
 });
 
@@ -228,29 +251,20 @@ router.get('/bookings', authenticateToken, async (req, res) => {
   try {
     const { status, date } = req.query;
     
-    let query = `
-      SELECT rb.*, r.room_number, r.room_type, g.full_name as guest_name, g.phone as guest_phone
-      FROM room_bookings rb
-      JOIN rooms r ON rb.room_id = r.id
-      JOIN guests g ON rb.guest_id = g.id
-      WHERE 1=1
-    `;
-    const values = [];
-    let paramCount = 1;
+    let query = supabase
+      .from('room_bookings')
+      .select('*, rooms(room_number, room_type), guests(full_name, phone)')
+      .order('check_in', { ascending: false });
 
-    if (status) {
-      query += ` AND rb.payment_status = $${paramCount++}`;
-      values.push(status);
-    }
+    if (status) query = query.eq('payment_status', status);
     if (date) {
-      query += ` AND $${paramCount++}::date BETWEEN rb.check_in AND rb.check_out`;
-      values.push(date);
+      query = query.lte('check_in', date).gte('check_out', date);
     }
 
-    query += ` ORDER BY rb.check_in DESC`;
+    const { data: bookings, error } = await query;
 
-    const result = await pool.query(query, values);
-    res.json({ bookings: result.rows });
+    if (error) throw error;
+    res.json({ bookings });
   } catch (error) {
     console.error('Get bookings error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -262,28 +276,25 @@ router.post('/bookings/:id/check-in', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
 
-    const bookingResult = await pool.query(
-      `SELECT rb.*, r.room_number FROM room_bookings rb
-       JOIN rooms r ON rb.room_id = r.id
-       WHERE rb.id = $1`,
-      [id]
-    );
+    const { data: booking, error } = await supabase
+      .from('room_bookings')
+      .select('*, rooms(room_number)')
+      .eq('id', id)
+      .single();
 
-    if (bookingResult.rows.length === 0) {
+    if (error || !booking) {
       return res.status(404).json({ error: 'Booking not found' });
     }
 
-    const booking = bookingResult.rows[0];
-
     // Update room status
-    await pool.query(
-      `UPDATE rooms SET status = 'occupied' WHERE id = $1`,
-      [booking.room_id]
-    );
+    await supabase
+      .from('rooms')
+      .update({ status: 'occupied' })
+      .eq('id', booking.room_id);
 
-    await logActivity(req.user.id, 'CHECK_IN', 'rooms', `Guest checked in to room ${booking.room_number}`, req);
+    await logActivity(req.user.id, 'CHECK_IN', 'rooms', `Guest checked in to room ${booking.rooms?.room_number}`, req);
 
-    res.json({ message: 'Check-in successful', booking: bookingResult.rows[0] });
+    res.json({ message: 'Check-in successful', booking });
   } catch (error) {
     console.error('Check-in error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -292,99 +303,105 @@ router.post('/bookings/:id/check-in', authenticateToken, async (req, res) => {
 
 // Check-out
 router.post('/bookings/:id/check-out', authenticateToken, async (req, res) => {
-  const client = await pool.connect();
-  
   try {
-    await client.query('BEGIN');
-
     const { id } = req.params;
     const { additional_charges = 0, payment_method, mpesa_receipt } = req.body;
 
-    const bookingResult = await client.query(
-      `SELECT rb.*, r.room_number FROM room_bookings rb
-       JOIN rooms r ON rb.room_id = r.id
-       WHERE rb.id = $1`,
-      [id]
-    );
+    const { data: booking, error } = await supabase
+      .from('room_bookings')
+      .select('*, rooms(room_number)')
+      .eq('id', id)
+      .single();
 
-    if (bookingResult.rows.length === 0) {
+    if (error || !booking) {
       return res.status(404).json({ error: 'Booking not found' });
     }
 
-    const booking = bookingResult.rows[0];
-
     // Calculate final amount
     const totalDue = parseFloat(booking.total_amount) + parseFloat(additional_charges);
-    const balance = totalDue - parseFloat(booking.paid_amount);
+    const balance = totalDue - parseFloat(booking.paid_amount || 0);
 
     // Process payment if there's balance
     if (balance > 0 && payment_method) {
-      await client.query(
-        `INSERT INTO payments (room_booking_id, amount, payment_method, mpesa_receipt, processed_by)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [id, balance, payment_method, mpesa_receipt, req.user.id]
-      );
+      await supabase
+        .from('payments')
+        .insert({
+          room_booking_id: id,
+          amount: balance,
+          payment_method,
+          mpesa_receipt,
+          processed_by: req.user.id,
+          status: 'completed'
+        });
 
-      await client.query(
-        `UPDATE room_bookings SET paid_amount = paid_amount + $1, payment_status = 'paid' WHERE id = $2`,
-        [balance, id]
-      );
+      await supabase
+        .from('room_bookings')
+        .update({ 
+          paid_amount: parseFloat(booking.paid_amount || 0) + balance, 
+          payment_status: 'paid' 
+        })
+        .eq('id', id);
     }
 
     // Update room status
-    await client.query(
-      `UPDATE rooms SET status = 'available' WHERE id = $1`,
-      [booking.room_id]
-    );
+    await supabase
+      .from('rooms')
+      .update({ status: 'available' })
+      .eq('id', booking.room_id);
 
-    await client.query('COMMIT');
+    await logActivity(req.user.id, 'CHECK_OUT', 'rooms', `Guest checked out from room ${booking.rooms?.room_number}`, req);
 
-    await logActivity(req.user.id, 'CHECK_OUT', 'rooms', `Guest checked out from room ${booking.room_number}`, req);
-
-    const updatedBooking = await pool.query(
-      `SELECT rb.*, r.room_number FROM room_bookings rb
-       JOIN rooms r ON rb.room_id = r.id
-       WHERE rb.id = $1`,
-      [id]
-    );
+    const { data: updatedBooking } = await supabase
+      .from('room_bookings')
+      .select('*, rooms(room_number)')
+      .eq('id', id)
+      .single();
 
     res.json({ 
       message: 'Check-out successful', 
-      booking: updatedBooking.rows[0],
+      booking: updatedBooking,
       totalDue,
       balance
     });
   } catch (error) {
-    await client.query('ROLLBACK');
     console.error('Check-out error:', error);
     res.status(500).json({ error: 'Internal server error' });
-  } finally {
-    client.release();
   }
 });
 
 // Get room statistics
 router.get('/stats', authenticateToken, async (req, res) => {
   try {
-    const stats = await pool.query(
-      `SELECT 
-        COUNT(*) as total_rooms,
-        COUNT(*) FILTER (WHERE status = 'occupied') as occupied_rooms,
-        COUNT(*) FILTER (WHERE status = 'available') as available_rooms,
-        COUNT(*) FILTER (WHERE status = 'maintenance') as maintenance_rooms,
-        COALESCE(SUM(price_per_night) FILTER (WHERE status = 'occupied'), 0) as occupied_revenue
-       FROM rooms`
-    );
+    const { data: rooms } = await supabase
+      .from('rooms')
+      .select('status, price_per_night');
 
-    const todayBookings = await pool.query(
-      `SELECT COUNT(*) as today_checkins
-       FROM room_bookings 
-       WHERE check_in = CURRENT_DATE AND payment_status != 'cancelled'`
-    );
+    const totalRooms = rooms.length;
+    const occupiedRooms = rooms.filter(r => r.status === 'occupied').length;
+    const availableRooms = rooms.filter(r => r.status === 'available').length;
+    const maintenanceRooms = rooms.filter(r => r.status === 'maintenance').length;
+    const occupiedRevenue = rooms
+      .filter(r => r.status === 'occupied')
+      .reduce((sum, r) => sum + parseFloat(r.price_per_night || 0), 0);
+
+    const today = new Date().toISOString().slice(0, 10);
+    const { count: todayCheckins } = await supabase
+      .from('room_bookings')
+      .select('*', { count: 'exact', head: true })
+      .eq('check_in', today)
+      .neq('payment_status', 'cancelled');
 
     res.json({
-      stats: stats.rows[0],
-      todayCheckins: todayBookings.rows[0]
+      stats: {
+        total_rooms: totalRooms,
+        occupied_rooms: occupiedRooms,
+        available_rooms: availableRooms,
+        maintenance_rooms: maintenanceRooms,
+        occupied_revenue: occupiedRevenue
+      },
+      todayCheckins: {
+        today_checkins: todayCheckins || 0
+      }
     });
   } catch (error) {
     console.error('Get room stats error:', error);

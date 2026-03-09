@@ -1,0 +1,13 @@
+{
+  "name": "new-ikuuni-client",
+  "version": "1.0.0",
+  "description": "Frontend for New Ikuuni Financial Management System",
+  "scripts": {
+    "start": "npx serve public -l 3001",
+    "build": "npx public build"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "serve": "^14.2.0"
+  }
+}

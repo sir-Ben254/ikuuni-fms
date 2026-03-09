@@ -74,12 +74,13 @@ cron.schedule('0 0 * * *', async () => {
     const dateStr = yesterday.toISOString().split('T')[0];
 
     // Get sales data
-    const { data: sales } = await db.select('orders', { 
-      created_at: `gte.${dateStr}` 
-    });
+    const { data: sales } = await supabase
+      .from('orders')
+      .select('id, total_amount')
+      .gte('created_at', dateStr);
 
     // Simplified - in production, calculate properly
-    console.log(`Daily report generated for ${dateStr}`);
+    console.log(`Daily report generated for ${dateStr}, orders: ${sales?.length || 0}`);
   } catch (error) {
     console.error('Error generating daily report:', error);
   }

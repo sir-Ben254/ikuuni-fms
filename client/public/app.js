@@ -1,5 +1,5 @@
 // New Ikuuni Financial Management System - Frontend Application
-const API_BASE = '/api';
+const API_BASE = 'https://ikuuni-fms.onrender.com';
 
 // Global State
 let currentUser = null;

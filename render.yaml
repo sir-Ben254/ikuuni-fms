@@ -1,13 +1,15 @@
 services:
   - type: web
-    name: new-ikuuni-fms
+    name: ikuuni-fms
     env: node
     buildCommand: npm install
-    startCommand: npm start
+    startCommand: node server/index.js
     envVars:
       - key: SUPABASE_URL
         value: https://lmhapnpqdxzgrsoupklq.supabase.co
       - key: SUPABASE_ANON_KEY
         value: sb_publishable_72jelmMtrLfKl592C_VhuA_r0So5Mcx
-      - key: PORT
-        value: 10000
+      - key: JWT_SECRET
+        value: ikuuni-fms-secret-key-2024
+      - key: JWT_EXPIRES_IN
+        value: 24h

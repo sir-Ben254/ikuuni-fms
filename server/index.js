@@ -5,6 +5,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const cron = require('node-cron');
 const bcrypt = require('bcryptjs');
+const path = require('path');
 
 const { db, supabase, initDatabase } = require('./config/database');
 
@@ -45,15 +46,23 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Serve static files from docs folder
+app.use(express.static(path.join(__dirname, '../docs')));
+
+// Serve index.html for root route
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, '../docs/index.html'));
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({ error: 'Something went wrong!' });
 });
 
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({ error: 'Route not found' });
+// 404 handler - only for API routes
+app.use('/api/*', (req, res) => {
+  res.status(404).json({ error: 'API route not found' });
 });
 
 // Automated Daily Report Generation (Midnight)

@@ -1,12 +1,8 @@
 // Supabase Client Configuration for Frontend
-// Replace with your Supabase credentials
+// Using the actual Supabase credentials
 
-const SUPABASE_URL = 'https://your-project.supabase.co';
-const SUPABASE_ANON_KEY = 'your-anon-key';
-
-// For production, use environment variables
-// const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-// const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const SUPABASE_URL = 'https://lmhapnpqdxzgrsoupklq.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxtaGFwbnBxZHh6Z3Jzb3Vwa2xxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDk0OTM4NjMsImV4cCI6MjAyNTA2OTg2M30.Vx6XZ3_oLb9e-7dN3z9g0U5W2-4aZJZ5qYzG8pY6kCQ';
 
 const _supabase = {
   url: SUPABASE_URL,
@@ -74,10 +70,15 @@ const _supabase = {
   }
 };
 
-// API Helper that uses Supabase
+// API Helper - detects current host automatically
+const getApiBaseUrl = () => {
+  // In production, use relative path to call own server
+  return '/api';
+};
+
 const apiCall = async (endpoint, options = {}) => {
   const token = localStorage.getItem('token');
-  const baseUrl = 'http://localhost:3000/api';
+  const baseUrl = getApiBaseUrl();
   
   try {
     const response = await fetch(`${baseUrl}${endpoint}`, {

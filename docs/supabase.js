@@ -2,7 +2,7 @@
 // Using the actual Supabase credentials
 
 const SUPABASE_URL = 'https://lmhapnpqdxzgrsoupklq.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxtaGFwbnBxZHh6Z3Jzb3Vwa2xxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDk0OTM4NjMsImV4cCI6MjAyNTA2OTg2M30.Vx6XZ3_oLb9e-7dN3z9g0U5W2-4aZJZ5qYzG8pY6kCQ';
+const SUPABASE_ANON_KEY = 'sb_publishable_72jelmMtrLfKl592C_VhuA_r0So5Mcx';
 
 const _supabase = {
   url: SUPABASE_URL,
